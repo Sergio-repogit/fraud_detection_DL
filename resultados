@@ -1,0 +1,759 @@
+# Análisis Detallado de Resultados
+
+Este documento presenta un análisis  de los resultados obtenidos en el proyecto de detección de fraude con Deep Learning, incluyendo métricas, interpretación de rendimiento y comparativas entre modelos.
+
+## Contexto del Problema
+
+### Características del Dataset
+
+**Dataset original:**
+- 5.000.000 transacciones
+- 179.553 fraudes (3,6%)
+- 4.820.447 transacciones legítimas (96,4%)
+
+**Dataset reducido (para entrenamiento):**
+- 1.500.000 transacciones
+- 179.553 fraudes (11,75%)
+- 1.320.447 transacciones legítimas (88,25%)
+
+**División Train/Test:**
+- Train: 1,200,000 registros (80%)
+- Test: 300.000 registros (20%)
+- Estratificación: proporciones mantenidas
+
+### Características Finales
+
+Tras el preprocesamiento, el modelo trabaja con **33 features** resultantes de:
+- 5 variables numéricas (estandarizadas)
+- 6 variables categóricas (one-hot encoded → 28 columnas binarias)
+
+---
+
+## Métricas de Evaluación
+
+### ¿Por qué no usar Accuracy?
+
+Con un dataset donde el 88% es no-fraude, un modelo que clasifique **todo como no-fraude** obtendría:
+- **Accuracy: 88%** ← Engañoso
+- **Recall: 0%** ← No detecta ningún fraude
+- **PR-AUC: 0** ← Sin capacidad discriminativa
+
+Por ello, las métricas relevantes son:
+
+### Métricas Principales
+
+#### 1. **PR-AUC (Precision-Recall Area Under Curve)**
+- **Métrica principal del proyecto**
+- Resumen de la curva precision-recall en todos los umbrales
+- Valores: 0 (peor) a 1 (perfecto)
+- **Interpretación:** Qué tan bien el modelo balancea precision y recall
+- **Ventaja:** Insensible al desbalanceo (ignora los verdaderos negativos)
+
+#### 2. **ROC-AUC (Receiver Operating Characteristic AUC)**
+- Área bajo la curva TPR vs FPR
+- Valores: 0.5 (aleatorio) a 1 (perfecto)
+- **Interpretación:** Capacidad de discriminación entre clases
+- **Limitación:** Puede ser optimista en datasets desbalanceados
+
+#### 3. **Recall (Sensibilidad, True Positive Rate)**
+```
+Recall = TP / (TP + FN)
+```
+- **Interpretación:** % de fraudes detectados del total de fraudes reales
+- **Crítico en fraude:** Un fraude no detectado puede tener alto coste
+
+#### 4. **Precision (Valor Predictivo Positivo)**
+```
+Precision = TP / (TP + FP)
+```
+- **Interpretación:** % de alertas que son fraudes reales
+- **Importante:** Determina la carga de trabajo de revisión manual
+
+#### 5. **F1-Score**
+```
+F1 = 2 × (Precision × Recall) / (Precision + Recall)
+```
+- **Interpretación:** Media armónica entre precision y recall
+- **Ventaja:** Balance entre ambas métricas
+
+---
+
+## Resultados por Modelo
+
+### 1. Regresión Logística (Baseline)
+
+#### Configuración
+```python
+Pipeline:
+- StandardScaler + OneHotEncoder
+- LogisticRegression(max_iter=1000, random_state=42)
+```
+
+#### Resultados
+
+**Matriz de confusión:**
+```
+                  Predicho
+                  No Fraude  Fraude
+Real No Fraude    264,089      0
+Real Fraude        35,911      0
+```
+
+**Métricas:**
+- Accuracy: 88.0%
+- **Recall: 0.0%** Problema crítico
+- Precision: N/A
+- F1-Score: 0.0
+- **PR-AUC: 0.000**
+- **ROC-AUC: 0.500** 
+
+#### Interpretación
+
+El modelo **colapsa completamente** hacia la clase mayoritaria. Predice **todo como no-fraude**, resultando en:
+- Alta accuracy (métrica engañosa)
+-  Cero fraudes detectados
+-  Inútil para el objetivo del proyecto
+
+**Causa:** El desbalanceo extremo hace que minimizar el error total sea equivalente a predecir siempre la clase mayoritaria.
+
+---
+
+### 2. Regresión Logística + SMOTE
+
+#### Configuración
+```python
+Pipeline:
+- StandardScaler + OneHotEncoder
+- SMOTE(random_state=42)  ← Genera muestras sintéticas de fraudes
+- LogisticRegression(max_iter=1000)
+```
+
+#### Resultados
+
+**Matriz de confusión:**
+```
+                  Predicho
+                  No Fraude  Fraude
+Real No Fraude    119,956   144,133
+Real Fraude        16,180    19,731
+```
+
+**Métricas:**
+- Accuracy: 46.6%
+- **Recall: 54.9%**
+- Precision: 12.1%
+- F1-Score: 0.198
+- **PR-AUC: 0.121**
+- **ROC-AUC: 0.586**
+
+#### Interpretación
+
+SMOTE **desbloquea el modelo** permitiéndole detectar fraudes:
+- Detecta 54.9% de fraudes (19,731 de 35,911)
+-  16,180 fraudes siguen sin detectarse
+-  Alta tasa de falsos positivos (144,133)
+-  Por cada fraude real detectado, se generan ~7.3 falsas alarmas
+
+**Balance:** El modelo es ahora funcional pero con rendimiento limitado.
+
+---
+
+### 3. Support Vector Machine (SVM)
+
+#### Configuración
+```python
+Pipeline:
+- StandardScaler + OneHotEncoder
+- LinearSVC(max_iter=5000, class_weight={0: 1, 1: 27})
+```
+
+#### Resultados
+
+**Matriz de confusión:**
+```
+                  Predicho
+                  No Fraude  Fraude
+Real No Fraude        0     264,089
+Real Fraude           0      35,911
+```
+
+**Métricas:**
+- Accuracy: 12.0%
+- **Recall: 100%**  Detecta todos los fraudes pero porque clasifica todo como fraude
+- Precision: 12.0%
+- F1-Score: 0.213
+- **PR-AUC: 0.120**
+- **ROC-AUC: 0.500**
+
+#### Interpretación
+
+El modelo colapsa hacia el **extremo opuesto**: predice **todo como fraude**.
+- Detecta el 100% de fraudes (ninguno se escapa)
+-  Clasifica TODAS las transacciones legítimas como fraude
+-  264,089 falsos positivos (100% de transacciones legítimas)
+-  ROC-AUC = 0.5 indica discriminación aleatoria
+
+**Problema:** El `class_weight={0: 1, 1: 27}` sobreponderó excesivamente los fraudes. Para los pesos en de las clases se realizaron últiples pruebas pero pasaba de dar todo fraude a no dar ningún fraude
+---
+
+### 4. SVM + SMOTE
+
+#### Configuración
+```python
+Pipeline:
+- StandardScaler + OneHotEncoder
+- SMOTE(random_state=42)
+- LinearSVC(max_iter=5000, class_weight='balanced')
+```
+
+#### Resultados
+
+**Matriz de confusión:**
+```
+                  Predicho
+                  No Fraude  Fraude
+Real No Fraude    119,701   144,388
+Real Fraude        16,153    19,758
+```
+
+**Métricas:**
+- Accuracy: 46.5%
+- **Recall: 55.0%**
+- Precision: 12.1%
+- F1-Score: 0.198
+- **PR-AUC: 0.121**
+- **ROC-AUC: 0.586**
+
+#### Interpretación
+
+Rendimiento **prácticamente idéntico** a Regresión Logística + SMOTE:
+- Similar recall (~55%)
+- Similar precision (~12%)
+- Similar PR-AUC (0.121)
+
+**Conclusión:** SMOTE normaliza el rendimiento entre modelos lineales. SVM no aporta ventaja sobre regresión logística en este caso.
+
+---
+
+### 5. XGBoost (Sin SMOTE)
+
+#### Configuración
+```python
+Pipeline:
+- StandardScaler + OneHotEncoder
+- XGBClassifier(
+    n_estimators=300,
+    max_depth=5,
+    learning_rate=0.05,
+    scale_pos_weight=7.35,  ← Peso calculado automáticamente
+    random_state=42
+  )
+```
+
+#### Resultados
+
+**Matriz de confusión (estimada):**
+```
+                  Predicho
+                  No Fraude  Fraude
+Real No Fraude     52,800   211,289
+Real Fraude           360    35,551
+```
+
+**Métricas:**
+- Accuracy: 29.4%
+- **Recall: 98.9%**  Detecta casi todos los fraudes
+- Precision: 14.4%
+- F1-Score: 0.251
+- **PR-AUC: 0.143** 
+- **ROC-AUC: 0.59**
+
+#### Interpretación
+
+**Primer modelo que supera significativamente los baselines:**
+-  Detecta 98.9% de fraudes (35,551 de 35,911)
+-  Solo 360 fraudes no detectados
+-  PR-AUC = 0.143 (mejor que modelos lineales)
+-  211,289 falsos positivos (80% de transacciones legítimas)
+
+**Análisis de trade-offs:**
+```
+Por cada 100 transacciones flagged como fraude:
+- 14.4 son fraudes reales
+- 85.6 son falsos positivos
+```
+
+**Ventaja de XGBoost:** Captura interacciones no lineales y patrones complejos.
+
+---
+
+### 6. XGBoost + SMOTE
+
+#### Configuración
+```python
+Pipeline:
+- StandardScaler + OneHotEncoder
+- SMOTE(random_state=42)
+- XGBClassifier(
+    n_estimators=300,
+    max_depth=5,
+    learning_rate=0.05,
+    scale_pos_weight=7.35,
+    random_state=42
+  )
+```
+
+#### Resultados
+
+**Matriz de confusión:**
+```
+                  Predicho
+                  No Fraude  Fraude
+Real No Fraude     50,188   213,901
+Real Fraude           155    35,756
+```
+
+**Métricas:**
+- Accuracy: 28.6%
+- **Recall: 99.6%** 
+- Precision: 14.3%
+- F1-Score: 0.250
+- **PR-AUC: 0.143** 
+- **ROC-AUC: 0.59** 
+
+#### Interpretación
+
+**Rendimiento excepcional en detección:**
+- Detecta 99.6% de fraudes (35,756 de 35,911)
+- **Solo 155 fraudes pasan desapercibidos** (0.4%)
+- Mejor balance precision-recall del proyecto
+- 213,901 falsos positivos (sigue siendo alto)
+
+**Comparativa con XGBoost sin SMOTE:**
+- Recall: +0.7% (360 → 155 fraudes perdidos)
+- PR-AUC: +0.001 (mejora marginal)
+- Falsos positivos: +2,612 (ligero incremento)
+---
+
+### 7. Deep Learning (Keras)
+
+#### Configuración
+```python
+Arquitectura:
+- Input: 33 features
+- Dense(64, activation='relu') + Dropout(0.3)
+- Dense(32, activation='relu') + Dropout(0.3)
+- Dense(1, activation='sigmoid')
+
+Entrenamiento:
+- Optimizer: Adam
+- Loss: binary_crossentropy
+- Epochs: 20
+- Batch size: 1024
+- class_weight={0: 0.57, 1: 4.18}
+- EarlyStopping(patience=3)
+```
+
+#### Resultados
+
+**Matriz de confusión:**
+```
+                  Predicho
+                  No Fraude  Fraude
+Real No Fraude     57,672   206,417
+Real Fraude         1,380    34,531
+```
+
+**Métricas:**
+- Accuracy: 30.7%
+- **Recall: 96.2%**
+- Precision: 14.3%
+- F1-Score: 0.249
+- **PR-AUC: 0.144**
+- **ROC-AUC: 0.593**
+
+#### Validación Cruzada (10-fold)
+
+```
+PR-AUC:  0.144 ± 0.0011
+ROC-AUC: 0.592 ± 0.0035
+Accuracy: 0.3065 ± 0.0024
+```
+
+**Interpretación de la varianza:**
+- Desviaciones estándar muy bajas lo que significa que el Modelo es **estable**
+- Resultados consistentes entre folds
+- Validación cruzada confirma rendimiento
+
+#### Interpretación
+
+**Rendimiento competitivo pero inferior a XGBoost:**
+- Detecta 96.2% de fraudes (34,531 de 35,911)
+- Modelo estable (baja varianza en CV)
+- PR-AUC = 0.144 (Aumenta respecto al XGBoost)
+- 1,380 fraudes no detectados vs 155 de XGBoost
+
+**Trade-off complejidad vs rendimiento:**
+- Red neuronal: mayor complejidad computacional
+- XGBoost: rendimientomuy similar pero más simple
+---
+
+### 8. Grid Search en Deep Learning
+
+#### Configuración del Grid
+
+```python
+Espacio de búsqueda:
+- batch_size: [1024, 2048]
+- epochs: [20, 30]
+- optimizer: ['adam', 'rmsprop']
+
+Total combinaciones: 8
+Validación: StratifiedKFold(n_splits=10)
+Métrica: average_precision (PR-AUC)
+```
+
+#### Mejores Hiperparámetros
+
+```python
+{
+  'batch_size': 1024,
+  'epochs': 30,
+  'optimizer': 'adam'
+}
+```
+
+#### Resultados del Mejor Modelo
+
+**Interpretación:**
+- Grid Search **no mejoró significativamente** sobre el modelo base
+- Los hiperparámetros originales ya eran cercanos al óptimo
+- Varianza muy baja confirma robustez del modelo
+
+---
+
+### 9. MLP con Focal Loss (PyTorch)
+
+#### Configuración
+
+```python
+Arquitectura:
+- Input: 33 features
+- Linear(33 → 64) + ReLU
+- Linear(64 → 32) + ReLU
+- Linear(32 → 1) + Sigmoid
+
+Focal Loss:
+- alpha = 0.75  ← Mayor peso a clase positiva
+- gamma = 2.0   ← Penaliza ejemplos fáciles
+
+Entrenamiento:
+- Optimizer: Adam(lr=0.001)
+- Epochs: 20
+- Batch size: 1024
+```
+
+#### Evolución del Training Loss
+
+```
+Epoch 0  → Loss: 0.1786
+Epoch 5  → Loss: 0.1477
+Epoch 10 → Loss: 0.1247
+Epoch 15 → Loss: 0.1076
+```
+
+**Interpretación:** Descenso progresivo y estable, sin signos de overfitting.
+
+#### Resultados
+
+**Matriz de confusión:**
+```
+                  Predicho
+                  No Fraude  Fraude
+Real No Fraude     259676   4413
+Real Fraude         35301    610
+```
+
+**Métricas:**
+- Accuracy: 87%
+- **Recall: 2%**
+- Precision: 12%
+- F1-Score: 0.249
+- **PR-AUC: 0.11**
+- **ROC-AUC: 0.5**
+
+#### Interpretación
+
+**Ventaja de Focal Loss:**
+- Penaliza más los ejemplos difíciles de clasificar
+- Reduce el peso de ejemplos fáciles (bien clasificados)
+- **Útil cuando hay ejemplos frontera** en los datos
+
+**Comparativa con XGBoost:**
+- XGBoost sigue siendo superior (PR-AUC: 0.143 vs 0.11)
+- Deep Learning no supera a gradient boosting en este caso
+
+---
+
+### 10. Autoencoder (Detección de Anomalías)
+
+#### Configuración
+
+```python
+Arquitectura:
+- Encoder:
+  - Linear(33 → 16) + ReLU
+  - Linear(16 → 8) + ReLU
+  - Latent space: 8 dimensiones
+
+- Decoder:
+  - Linear(8 → 16) + ReLU
+  - Linear(16 → 33) + Sigmoid
+
+Entrenamiento:
+- Solo transacciones NO FRAUDE (1,056,358)
+- Loss: MSE (error de reconstrucción)
+- Optimizer: Adam(lr=0.001)
+- Epochs: 20
+```
+
+#### Estrategia de Detección
+
+```python
+1. Entrenar solo con transacciones legítimas
+2. Calcular error de reconstrucción en test
+3. Fraudes = transacciones con error > threshold
+
+Umbral: Percentil 95 del error en transacciones legítimas
+```
+
+#### Resultados
+
+**Matriz de confusión:**
+```
+                  Predicho
+                  No Fraude  Fraude
+Real No Fraude    250966     13123
+Real Fraude        33894     2017
+```
+
+**Métricas:**
+- Accuracy: 84.0%
+- **Recall: 6%**
+- Precision: 13%
+- F1-Score: 0.08
+- **PR-AUC: 0.13**
+- **ROC-AUC: 0.53**
+
+#### Interpretación
+
+**Enfoque no supervisado con limitaciones:**
+- **Precision más alta** 
+- **Recall bajo** (33894 fraudes no detectados)
+- **PR-AUC bajo** (0.13)
+
+**Causa del bajo rendimiento:**
+- Muchos fraudes son **estructuralmente similares** a transacciones legítimas
+- Autoencoder aprende patrones generales, no específicos de fraude
+- Detección de anomalías es **demasiado genérica** para este problema
+
+**Cuándo usar Autoencoders:**
+- Cuando NO hay labels disponibles
+- Cuando los fraudes son claramente outliers
+- Como complemento a modelos supervisados
+---
+
+### 11. Graph Neural Network (GNN)
+
+#### Configuración
+
+```python
+Estructura del grafo:
+- Nodos: 40,000 transacciones (muestra por memoria)
+  - Train: 30,000
+  - Test: 10,000
+- Aristas: 200,000 (k=5 vecinos más cercanos, KNN)
+- Features por nodo: 33
+
+Arquitectura GCN:
+- GCNConv(33 → 16)
+- ReLU + Dropout(0.3)
+- GCNConv(16 → 8)
+- ReLU + Dropout(0.3)
+- Linear(8 → 1) + Sigmoid
+
+Entrenamiento:
+- Optimizer: Adam(lr=0.01)
+- Loss: binary_crossentropy
+- Epochs: 50
+- class_weight={0: 0.57, 1: 4.18}
+```
+
+#### Construcción del Grafo
+
+```python
+# KNN para construir aristas
+from sklearn.neighbors import NearestNeighbors
+nbrs = NearestNeighbors(n_neighbors=5, metric='euclidean')
+nbrs.fit(X_train_pre_sample)
+
+# Cada transacción se conecta a sus 5 vecinos más cercanos
+# Similaridad basada en distancia euclídea en espacio de 33 features
+```
+
+#### Resultados
+
+**Matriz de confusión:**
+```
+                  Predicho
+                  No Fraude  Fraude
+Real No Fraude      5269     3556
+Real Fraude         709       466
+```
+
+**Métricas:**
+- Accuracy: 56.7%
+- **Recall: 39.9%**
+- Precision: 12%
+- F1-Score: 0.18
+- **PR-AUC: 0.12**
+- **ROC-AUC: 0.49**
+
+#### Interpretación
+
+**Limitaciones en este caso de uso:**
+- Rendimiento inferior a XGBoost y Deep Learning
+- **Recall bajo** 
+- Alto coste computacional vs beneficio obtenido
+
+**Problemas específicos:**
+
+1. **Muestra reducida por memoria:**
+   - GNN entrenado solo con 40K de 1.5M transacciones
+   - Pierde información valiosa del dataset completo
+
+2. **Estructura del grafo:**
+   - KNN en espacio de features crea aristas basadas en **similitud**
+   - Fraudes conectados a transacciones similares (no necesariamente fraudulentas)
+   - **No hay estructura de grafo real** (no son transacciones relacionadas en red)
+
+3. **Ventaja de GNN no aplicable:**
+   - GNN funciona bien cuando hay **propagación de información** en la red
+   - Ejemplo útil: red social (fraude se propaga por contactos)
+   - En este caso: transacciones son **eventos independientes**
+
+**Cuándo usar GNN para fraude:**
+- Fraude en redes sociales (cuentas falsas conectadas)
+- Lavado de dinero (transacciones encadenadas)
+- Fraude organizado (redes de cuentas coordinadas)
+
+## Lecciones Aprendidas
+
+### 1. El Desbalanceo Domina el Problema
+
+**Sin manejo del desbalanceo:**
+- Modelos colapsan hacia clase mayoritaria
+- Accuracy alta pero recall = 0%
+
+**Con manejo (SMOTE, class weights, focal loss):**
+- Modelos detectan fraudes
+- Accuracy baja pero recall alto
+
+**Conclusión:** El desbalanceo no es un detalle técnico, es EL problema central.
+
+---
+
+### 2. XGBoost Gana en Problemas Tabulares Desbalanceados
+
+**Ventajas demostradas:**
+- Mejor PR-AUC 
+- Mejor recall 
+- Manejo nativo de desbalanceo (`scale_pos_weight`)
+
+**Por qué XGBoost funciona mejor aquí:**
+- Boosting iterativo enfoca árboles en ejemplos difíciles
+- Regularización evita overfitting
+- Eficiente con features heterogéneas (num + cat)
+- Eficiencia computacional respecto a los modelos con métricas similares
+
+---
+
+### 3. Deep Learning No Siempre Es Superior
+
+**En este proyecto:**
+- DL competitivo pero no superior a XGBoost
+- Mayor complejidad (arquitectura, hiperparámetros)
+- Mayor coste computacional
+
+**Cuándo DL puede ganar:**
+- Datos no estructurados (imágenes, texto, audio)
+- Series temporales complejas
+- Datasets masivos 
+- Necesidad de embeddings o representaciones latentes
+---
+
+### 4. Validación Cruzada Da Confianza
+
+**Grid Search con 10-fold CV**
+
+**Interpretación:**
+- Desviación estándar muy baja (0.0011)
+- Rendimiento consistente entre folds
+- **Alta confianza** en la estimación
+
+**Valor en producción:** Permite predecir rendimiento futuro con más certeza.
+
+---
+
+### 5. Modelos específicos  No Siempre Superan
+
+Los modelos probados son modelos que requieren una gran cantidad de datos y aumentan su precisión con desbalanceos grandes, por lo que la reducción de la base les ha perjudicado
+---
+
+## Trabajo Futuro
+
+### 1. Feature Engineering Avanzado
+
+**Agregaciones temporales:**
+```python
+# Ventanas de tiempo
+- Número transacciones última hora/día/semana
+- Monto total gastado últimas 24h
+- Desviación respecto a patrón histórico
+```
+
+**Patrones de comportamiento:**
+```python
+- Hora habitual de transacciones del usuario
+- Merchants frecuentes
+- Ubicaciones habituales
+- Dispositivos registrados
+```
+
+### 2. Ensemble Methods
+
+**Stacking:**
+```python
+Meta-modelo que combina:
+- XGBoost 
+- MLP Focal Loss 
+- SVM
+
+Potencial: 0.36-0.38 PR-AUC metricas elevadas para este tipo de problemas
+
+```
+**Voting:**
+- Mayoría simple o ponderada
+- Más robusto ante casos edge
+
+### 3. Modelos de Serie Temporal
+
+**RNN/LSTM para secuencias:**
+```python
+Input: Últimas N transacciones del usuario
+Output: Probabilidad de fraude de la actual
+```
+
+**Ventaja:** Captura patrones temporales y secuenciales.
+
+---
