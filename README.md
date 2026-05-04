@@ -239,7 +239,7 @@ deteccion-fraude-deep-learning/
 ├── codigo_proyecto_final_ML.ipynb   # Notebook principal
 ├── README.md                         # Este archivo
 ├── RESULTADOS.md                     # Análisis detallado de resultados
-└── financial_fraud_detection_dataset.csv  # Dataset 
+└── financial_fraud_detection_dataset.csv  # Dataset no incluido por peso de la base
 ```
 
 ## Conclusiones
